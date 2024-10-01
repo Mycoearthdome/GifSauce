@@ -1,5 +1,5 @@
 extern crate lzw;
-use lzw::{BitReader, Decoder, Encoder, LsbReader, LsbWriter};
+use lzw::{Encoder, LsbWriter};
 use std::env;
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Cursor, Error, Read, Seek, SeekFrom, Write};
@@ -43,14 +43,19 @@ struct ApplicationExtension {
     data: Vec<u8>,
 }
 
+#[repr(C)] // Ensures the struct has the same memory layout as in C
 #[derive(Debug)]
-struct PlainTextExtension {
-    left: u16,
-    top: u16,
-    width: u16,
-    height: u16,
-    packed_field: u8,
-    text: Vec<u8>,
+pub struct PlainTextExtension {
+    pub block_size: u8,
+    pub text_grid_left_position: u16,
+    pub text_grid_top_position: u16,
+    pub text_grid_width: u16,
+    pub text_grid_height: u16,
+    pub character_cell_width: u8,
+    pub character_cell_height: u8,
+    pub text_foreground_color_index: u8,
+    pub text_background_color_index: u8,
+    pub plain_text_data: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -75,40 +80,6 @@ struct GIF {
     application_extensions: Vec<ApplicationExtension>,
     plain_text_extensions: Vec<PlainTextExtension>,
     image_descriptors: Vec<ImageDescriptor>,
-}
-
-struct BitWriter {
-    bit_buffer: u32,
-    bit_count: u8,
-}
-
-impl BitWriter {
-    fn new() -> Self {
-        BitWriter {
-            bit_buffer: 0,
-            bit_count: 0,
-        }
-    }
-
-    fn write_code(&mut self, compressed_data: &mut Vec<u8>, code: u16, code_size: u8) {
-        self.bit_buffer |= (code as u32) << self.bit_count;
-        self.bit_count += code_size;
-
-        // Flush full bytes from the buffer into the compressed data
-        while self.bit_count >= 8 {
-            compressed_data.push(self.bit_buffer as u8);
-            self.bit_buffer >>= 8;
-            self.bit_count -= 8;
-        }
-    }
-
-    fn flush(&mut self, compressed_data: &mut Vec<u8>) {
-        if self.bit_count > 0 {
-            compressed_data.push(self.bit_buffer as u8);
-            self.bit_buffer = 0;
-            self.bit_count = 0;
-        }
-    }
 }
 
 fn track_position<R: Read + Seek>(reader: &mut R, description: &str) -> io::Result<u64> {
@@ -265,26 +236,43 @@ fn read_application_extension<R: Read>(reader: &mut R) -> Result<ApplicationExte
 }
 
 fn read_plain_text_extension<R: Read>(reader: &mut R) -> Result<PlainTextExtension, Error> {
-    let mut left = [0; 2];
-    reader.read_exact(&mut left)?;
-    let left = u16::from_le_bytes(left);
+    let mut block_size = [0; 1];
+    reader.read_exact(&mut block_size)?;
+    let block_size = block_size[0];
 
-    let mut top = [0; 2];
-    reader.read_exact(&mut top)?;
-    let top = u16::from_le_bytes(top);
+    let mut text_grid_left_position = [0; 2];
+    reader.read_exact(&mut text_grid_left_position)?;
+    let text_grid_left_position = u16::from_le_bytes(text_grid_left_position);
 
-    let mut width = [0; 2];
-    reader.read_exact(&mut width)?;
-    let width = u16::from_le_bytes(width);
+    let mut text_grid_top_position = [0; 2];
+    reader.read_exact(&mut text_grid_top_position)?;
+    let text_grid_top_position = u16::from_le_bytes(text_grid_top_position);
 
-    let mut height = [0; 2];
-    reader.read_exact(&mut height)?;
-    let height = u16::from_le_bytes(height);
+    let mut text_grid_width = [0; 2];
+    reader.read_exact(&mut text_grid_width)?;
+    let text_grid_width = u16::from_le_bytes(text_grid_width);
 
-    let mut packed_field = [0; 1];
-    reader.read_exact(&mut packed_field)?;
+    let mut text_grid_height = [0; 2];
+    reader.read_exact(&mut text_grid_height)?;
+    let text_grid_height = u16::from_le_bytes(text_grid_height);
 
-    let mut text_data = Vec::new();
+    let mut character_cell_width = [0; 1];
+    reader.read_exact(&mut character_cell_width)?;
+    let character_cell_width = character_cell_width[0];
+
+    let mut character_cell_height = [0; 1];
+    reader.read_exact(&mut character_cell_height)?;
+    let character_cell_height = character_cell_height[0];
+
+    let mut text_foreground_color_index = [0; 1];
+    reader.read_exact(&mut text_foreground_color_index)?;
+    let text_foreground_color_index = text_foreground_color_index[0];
+
+    let mut text_background_color_index = [0; 1];
+    reader.read_exact(&mut text_background_color_index)?;
+    let text_background_color_index = text_background_color_index[0];
+
+    let mut plain_text_data = Vec::new();
 
     loop {
         let mut block_size = [0; 1];
@@ -295,16 +283,20 @@ fn read_plain_text_extension<R: Read>(reader: &mut R) -> Result<PlainTextExtensi
 
         let mut block_data = vec![0; block_size[0] as usize];
         reader.read_exact(&mut block_data)?;
-        text_data.extend(block_data);
+        plain_text_data.extend(block_data);
     }
 
     Ok(PlainTextExtension {
-        left,
-        top,
-        width,
-        height,
-        packed_field: packed_field[0],
-        text: text_data,
+        block_size,
+        text_grid_left_position,
+        text_grid_top_position,
+        text_grid_width,
+        text_grid_height,
+        character_cell_width,
+        character_cell_height,
+        text_foreground_color_index,
+        text_background_color_index,
+        plain_text_data,
     })
 }
 
@@ -589,19 +581,9 @@ fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
     })
 }
 
-// Function to detect if "Copyright" is in the plain text extension
-fn modify_plain_text_extension(text: &mut PlainTextExtension) {
-    let decoded_text = String::from_utf8_lossy(&text.text).to_string();
-    if decoded_text.contains("Copyright") {
-        let modified_text = format!("{} (Modified)", decoded_text);
-        text.text = modified_text.into_bytes();
-        println!("Modified Plain Text Extension: {:?}", text);
-    }
-}
-
 // function to reassemble the GIF
 fn reassemble_gif<R: Read + Seek>(
-    reader: &mut R,
+    _reader: &mut R,
     output_file: &str,
     gif: &GIF,
 ) -> Result<(), std::io::Error> {
@@ -658,24 +640,25 @@ fn reassemble_gif<R: Read + Seek>(
     }
 
     // 7. Write plain text extensions
+    let mut first: bool = true;
     for plain_text in &gif.plain_text_extensions {
-        writer.write_all(&[0x21, 0x01, 0xFF])?; // Plain Text Extension introducer
-        writer.write_all(&plain_text.left.to_le_bytes())?;
-        writer.write_all(&plain_text.top.to_le_bytes())?;
-        writer.write_all(&plain_text.width.to_le_bytes())?;
-        writer.write_all(&plain_text.height.to_le_bytes())?;
-        writer.write_all(&[plain_text.packed_field])?;
-
-        //TEST
-        writer.write_all(&plain_text.text)?;
-        //END TEST
-
-        //for chunk in plain_text.text.chunks(255) {
-        //    writer.write_all(&[chunk.len() as u8])?;
-        //    writer.write_all(chunk)?;
-        //}
-        writer.write_all(&[0])?; // Block terminator
+        if first {
+            writer.write_all(&[0x21, 0x01, plain_text.block_size])?; // Plain Text Extension introducer
+            writer.write_all(&plain_text.text_grid_left_position.to_le_bytes())?;
+            writer.write_all(&plain_text.text_grid_top_position.to_le_bytes())?;
+            writer.write_all(&plain_text.text_grid_width.to_le_bytes())?;
+            writer.write_all(&plain_text.text_grid_height.to_le_bytes())?;
+            writer.write_all(&[plain_text.character_cell_width])?;
+            writer.write_all(&[plain_text.character_cell_height])?;
+            writer.write_all(&[plain_text.text_foreground_color_index])?;
+            writer.write_all(&[plain_text.text_background_color_index])?;
+            first = false;
+        } else {
+            writer.write_all(&plain_text.plain_text_data)?;
+        }
     }
+
+    writer.write_all(&[0x00])?; // Block terminator
 
     // 8. Write image descriptors
     for image_descriptor in &gif.image_descriptors {
@@ -738,46 +721,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
-    let chunk = input.len() / gif.image_descriptors.len();
+    let block_size = 254;
     let new_plain_text_extensions: Vec<_> = gif
         .image_descriptors
         .iter()
         .enumerate()
         .map(|(index, _)| {
-            let mut new_extended = PlainTextExtension {
-                left: 0,
-                top: 0,
-                width: 0,
-                height: 0,
-                packed_field: 0,
-                text: vec![],
+            let new_extended = PlainTextExtension {
+                block_size: 12,
+                text_grid_left_position: 0,
+                text_grid_top_position: 0,
+                text_grid_width: 0,
+                text_grid_height: 0,
+                character_cell_width: 0,
+                character_cell_height: 0,
+                text_foreground_color_index: 0,
+                text_background_color_index: 0,
+                plain_text_data: input[index * block_size..(index + 1) * block_size]
+                    .as_bytes()
+                    .to_vec(),
             };
-
-            // Create sub-blocks
-            let data_chunk = &input[(index * chunk)..(index * chunk + chunk)];
-            let mut sub_block_data = Vec::new();
-            let mut current_pos = 0;
-
-            while current_pos < data_chunk.len() {
-                // Each sub-block starts with a length byte
-                let remaining_bytes = data_chunk.len() - current_pos;
-                let block_size = if remaining_bytes > 255 {
-                    255
-                } else {
-                    remaining_bytes
-                };
-
-                sub_block_data.push(block_size as u8);
-                sub_block_data.extend_from_slice(
-                    data_chunk[current_pos..(current_pos + block_size)].as_bytes(),
-                );
-                current_pos += block_size;
-            }
-
-            // Add the terminator sub-block (0x00)
-            sub_block_data.push(0x00);
-
-            new_extended.text = sub_block_data;
             new_extended
         })
         .collect();
