@@ -1,0 +1,14 @@
+[package]
+name = "GifSauce"
+version = "0.0.1"
+edition2024 = "2024"
+
+[profile.dev]
+debug = true
+
+[dependencies]
+lzw = "0.10.0"
+
+[[bin]]
+name = "GifSauce"
+path = "GifSauce.rs"
