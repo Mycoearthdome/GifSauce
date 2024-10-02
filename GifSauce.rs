@@ -3,6 +3,7 @@ use lzw::{Encoder, LsbWriter};
 use std::env;
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Cursor, Error, Read, Seek, SeekFrom, Write};
+use std::process::exit;
 
 #[derive(Debug)]
 struct GIFHeader {
@@ -44,7 +45,7 @@ struct ApplicationExtension {
 }
 
 #[repr(C)] // Ensures the struct has the same memory layout as in C
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PlainTextExtension {
     pub block_size: u8,
     pub text_grid_left_position: u16,
@@ -84,7 +85,7 @@ struct GIF {
 
 fn track_position<R: Read + Seek>(reader: &mut R, description: &str) -> io::Result<u64> {
     let position = reader.stream_position()?;
-    println!("{} at byte position: {}", description, position);
+    //println!("{} at byte position: {}", description, position);
     Ok(position)
 }
 
@@ -480,10 +481,10 @@ fn lzw_compress(data: &[u8], min_code_size: u8) -> Vec<u8> {
 
 fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
     let header = read_gif_header(reader)?;
-    println!("Header: {:?}", header);
+    //println!("Header: {:?}", header);
 
     let logical_screen_descriptor = read_logical_screen_descriptor(reader)?;
-    println!("Logical Screen Descriptor: {:?}", logical_screen_descriptor);
+    //println!("Logical Screen Descriptor: {:?}", logical_screen_descriptor);
 
     // Check global color table size
     let global_color_table_size = if (logical_screen_descriptor.packed_field & 0b111) > 0 {
@@ -497,7 +498,7 @@ fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
     } else {
         None
     };
-    println!("Global Color Table: {:?}", global_color_table);
+    //println!("Global Color Table: {:?}", global_color_table);
 
     let mut graphics_control_extension = None;
     let mut comment_extensions = Vec::new();
@@ -505,12 +506,13 @@ fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
     let mut plain_text_extensions = Vec::new();
     let mut image_descriptors = Vec::new();
 
+    let mut plain_text_found = false;
     loop {
         let mut block_indicator = [0; 1];
         match reader.read_exact(&mut block_indicator) {
             Ok(_) => {
                 track_position(reader, "Block Indicator")?;
-                println!("Block Indicator: {:#X}", block_indicator[0]);
+                //ln!("Block Indicator: {:#X}", block_indicator[0]);
 
                 if block_indicator[0] == 0x21 {
                     // Extension Introducer
@@ -530,6 +532,17 @@ fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
                         }
                         0x01 => {
                             plain_text_extensions.push(read_plain_text_extension(reader)?);
+                            println!(
+                                "{}",
+                                String::from_utf8_lossy(
+                                    plain_text_extensions
+                                        .last()
+                                        .unwrap()
+                                        .plain_text_data
+                                        .as_slice()
+                                )
+                            );
+                            plain_text_found = true;
                         }
                         _ => {
                             // Skip unknown extensions
@@ -567,6 +580,10 @@ fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
                 return Err(e); // Propagate other errors
             }
         }
+    }
+
+    if plain_text_found {
+        exit(0);
     }
 
     Ok(GIF {
@@ -654,9 +671,14 @@ fn reassemble_gif<R: Read + Seek>(
             writer.write_all(&[plain_text.character_cell_height])?;
             writer.write_all(&[plain_text.text_foreground_color_index])?;
             writer.write_all(&[plain_text.text_background_color_index])?;
+            let length = plain_text.plain_text_data.len();
+            //println!("Length: {}", length);
+            writer.write_all(&[length as u8])?; //255
+            writer.write_all(&plain_text.plain_text_data)?; //254
             first = false;
         } else {
             let length = plain_text.plain_text_data.len();
+            //println!("Length: {}", length);
             writer.write_all(&[length as u8])?; //255
             writer.write_all(&plain_text.plain_text_data)?; //254
         }
@@ -727,7 +749,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let input_chunk = 254;
-    let new_plain_text_extensions: Vec<_> = gif
+    let new_plain_text_extensions: Vec<PlainTextExtension> = gif
         .image_descriptors
         .iter()
         .enumerate()
