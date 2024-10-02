@@ -20,7 +20,7 @@ struct LogicalScreenDescriptor {
     pixel_aspect_ratio: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ColorTable {
     colors: Vec<[u8; 3]>,
 }
@@ -59,7 +59,7 @@ pub struct PlainTextExtension {
     pub plain_text_data: Vec<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ImageDescriptor {
     left: u16,
     top: u16,
@@ -749,6 +749,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let input_chunk = 254;
+    // Adjusting to content length.
+    loop {
+        if (input.len() / input_chunk) > gif.image_descriptors.len() {
+            let descriptors_clone = gif.image_descriptors.clone();
+            gif.image_descriptors.extend(descriptors_clone);
+            println!("Extended image descriptors");
+        } else {
+            println!("Done extending image descriptors");
+            break;
+        }
+    }
+
     let new_plain_text_extensions: Vec<PlainTextExtension> = gif
         .image_descriptors
         .iter()
@@ -764,9 +776,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 character_cell_height: 0,
                 text_foreground_color_index: 0,
                 text_background_color_index: 0,
-                plain_text_data: input[index * input_chunk..(index + 1) * input_chunk]
-                    .as_bytes()
-                    .to_vec(),
+                plain_text_data: if ((index + 1) * input_chunk) <= input.len() {
+                    input[index * input_chunk..(index + 1) * input_chunk]
+                        .as_bytes()
+                        .to_vec()
+                } else {
+                    let start = (index * input_chunk) - (input.len() - ((index + 1) * input_chunk));
+                    if start > input.len() {
+                        vec![0u8; 254] //padding
+                    } else {
+                        //println!("Start: {}", start);
+                        input[start..].as_bytes().to_vec()
+                    }
+                },
             };
             new_extended
         })
