@@ -641,7 +641,9 @@ fn reassemble_gif<R: Read + Seek>(
 
     // 7. Write plain text extensions
     let mut first: bool = true;
+    let mut index = 0;
     for plain_text in &gif.plain_text_extensions {
+        index += 1;
         if first {
             writer.write_all(&[0x21, 0x01, plain_text.block_size])?; // Plain Text Extension introducer
             writer.write_all(&plain_text.text_grid_left_position.to_le_bytes())?;
@@ -654,11 +656,14 @@ fn reassemble_gif<R: Read + Seek>(
             writer.write_all(&[plain_text.text_background_color_index])?;
             first = false;
         } else {
-            writer.write_all(&plain_text.plain_text_data)?;
+            let length = plain_text.plain_text_data.len();
+            writer.write_all(&[length as u8])?; //255
+            writer.write_all(&plain_text.plain_text_data)?; //254
+        }
+        if gif.plain_text_extensions.len() == index {
+            writer.write_all(&[0])?; // Block terminator
         }
     }
-
-    writer.write_all(&[0x00])?; // Block terminator
 
     // 8. Write image descriptors
     for image_descriptor in &gif.image_descriptors {
@@ -721,7 +726,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
-    let block_size = 254;
+    let input_chunk = 254;
     let new_plain_text_extensions: Vec<_> = gif
         .image_descriptors
         .iter()
@@ -737,7 +742,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 character_cell_height: 0,
                 text_foreground_color_index: 0,
                 text_background_color_index: 0,
-                plain_text_data: input[index * block_size..(index + 1) * block_size]
+                plain_text_data: input[index * input_chunk..(index + 1) * input_chunk]
                     .as_bytes()
                     .to_vec(),
             };
