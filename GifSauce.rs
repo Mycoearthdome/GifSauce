@@ -760,8 +760,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
     }
-
-    let new_plain_text_extensions: Vec<PlainTextExtension> = gif
+    let mut count_remove = 0;
+    let mut new_plain_text_extensions: Vec<PlainTextExtension> = gif
         .image_descriptors
         .iter()
         .enumerate()
@@ -777,11 +777,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 text_foreground_color_index: 0,
                 text_background_color_index: 0,
                 plain_text_data: if ((index + 1) * input_chunk) <= input.len() {
-                    println!(
-                        "length={}, index + 1={}",
-                        input.len(),
-                        (index + 1) * input_chunk
-                    );
+                    //println!(
+                    //   "length={}, index + 1={}",
+                    //    input.len(),
+                    //    (index + 1) * input_chunk
+                    //);
                     input[index * input_chunk..(index + 1) * input_chunk]
                         .as_bytes()
                         .to_vec()
@@ -791,6 +791,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     //println!("Start: {}", start);
                     if start > input.len() {
                         //println!("-->padding");
+                        count_remove += 1;
                         vec![0u8; 254] //padding
                     } else {
                         //println!("Start-->bytes: {}", start);
@@ -801,6 +802,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             new_extended
         })
         .collect();
+
+    // Remove the padding
+    for _ in 0..count_remove {
+        gif.image_descriptors.pop();
+        new_plain_text_extensions.pop();
+    }
 
     gif.plain_text_extensions = new_plain_text_extensions;
 
