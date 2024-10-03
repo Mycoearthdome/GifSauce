@@ -532,7 +532,7 @@ fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
                         }
                         0x01 => {
                             plain_text_extensions.push(read_plain_text_extension(reader)?);
-                            println!(
+                            print!(
                                 "{}",
                                 String::from_utf8_lossy(
                                     plain_text_extensions
@@ -777,15 +777,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 text_foreground_color_index: 0,
                 text_background_color_index: 0,
                 plain_text_data: if ((index + 1) * input_chunk) <= input.len() {
+                    println!(
+                        "length={}, index + 1={}",
+                        input.len(),
+                        (index + 1) * input_chunk
+                    );
                     input[index * input_chunk..(index + 1) * input_chunk]
                         .as_bytes()
                         .to_vec()
                 } else {
-                    let start = (index * input_chunk) - (input.len() - ((index + 1) * input_chunk));
+                    //println!("-->index {}", index * input_chunk);
+                    let start = index * input_chunk;
+                    //println!("Start: {}", start);
                     if start > input.len() {
+                        //println!("-->padding");
                         vec![0u8; 254] //padding
                     } else {
-                        //println!("Start: {}", start);
+                        //println!("Start-->bytes: {}", start);
                         input[start..].as_bytes().to_vec()
                     }
                 },
