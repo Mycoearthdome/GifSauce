@@ -1,4 +1,5 @@
 extern crate lzw;
+
 use lzw::{Encoder, LsbWriter};
 use std::env;
 use std::fs::File;
@@ -83,7 +84,7 @@ struct GIF {
     image_descriptors: Vec<ImageDescriptor>,
 }
 
-fn track_position<R: Read + Seek>(reader: &mut R, description: &str) -> io::Result<u64> {
+fn track_position<R: Read + Seek>(reader: &mut R, _description: &str) -> io::Result<u64> {
     let position = reader.stream_position()?;
     //println!("{} at byte position: {}", description, position);
     Ok(position)
@@ -479,7 +480,7 @@ fn lzw_compress(data: &[u8], min_code_size: u8) -> Vec<u8> {
     cursor.into_inner() // Get the underlying Vec<u8>
 }
 
-fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
+fn parse_gif<R: Read + Seek>(reader: &mut R, decode: bool) -> Result<GIF, Error> {
     let header = read_gif_header(reader)?;
     //println!("Header: {:?}", header);
 
@@ -506,7 +507,6 @@ fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
     let mut plain_text_extensions = Vec::new();
     let mut image_descriptors = Vec::new();
 
-    let mut plain_text_found = false;
     loop {
         let mut block_indicator = [0; 1];
         match reader.read_exact(&mut block_indicator) {
@@ -532,17 +532,18 @@ fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
                         }
                         0x01 => {
                             plain_text_extensions.push(read_plain_text_extension(reader)?);
-                            print!(
-                                "{}",
-                                String::from_utf8_lossy(
-                                    plain_text_extensions
-                                        .last()
-                                        .unwrap()
-                                        .plain_text_data
-                                        .as_slice()
-                                )
-                            );
-                            plain_text_found = true;
+                            if decode {
+                                print!(
+                                    "{}",
+                                    String::from_utf8_lossy(
+                                        plain_text_extensions
+                                            .last()
+                                            .unwrap()
+                                            .plain_text_data
+                                            .as_slice()
+                                    )
+                                );
+                            }
                         }
                         _ => {
                             // Skip unknown extensions
@@ -567,10 +568,11 @@ fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
                     // Trailer
                     break;
                 } else {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Invalid GIF format.",
-                    ));
+                    break;
+                    //return Err(io::Error::new(
+                    //    io::ErrorKind::InvalidData,
+                    //    "Invalid GIF format.",
+                    //));
                 }
             }
             Err(e) => {
@@ -580,10 +582,6 @@ fn parse_gif<R: Read + Seek>(reader: &mut R) -> Result<GIF, Error> {
                 return Err(e); // Propagate other errors
             }
         }
-    }
-
-    if plain_text_found {
-        exit(0);
     }
 
     Ok(GIF {
@@ -726,20 +724,72 @@ fn reassemble_gif<R: Read + Seek>(
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get input and output file names from command line arguments
     let args: Vec<String> = env::args().collect();
-    if args.len() < 3 {
-        eprintln!("Usage: {} <input_file> <output_file>", args[0]);
+    let mut input_file = None;
+    let mut output_file = None;
+    let mut decode = false;
+
+    let mut args_iter = args.iter().skip(1); // Skip the program name
+    while let Some(arg) = args_iter.next() {
+        match arg.as_str() {
+            "-i" => {
+                if let Some(file) = args_iter.next() {
+                    input_file = Some(file.clone());
+                } else {
+                    eprintln!("Expected input file after -i");
+                    std::process::exit(1);
+                }
+            }
+            "-o" => {
+                if let Some(file) = args_iter.next() {
+                    output_file = Some(file.clone());
+                } else {
+                    eprintln!("Expected output file after -o");
+                    std::process::exit(1);
+                }
+            }
+            "-d" => loop {
+                match args_iter.next() {
+                    None => {
+                        eprintln!("-== End Processing files ==-");
+                        exit(0)
+                    }
+                    Some(default) => {
+                        let file = default.clone();
+                        println!("{}", file);
+                        input_file = Some(file.clone());
+                        decode = true;
+                        let file = File::open(&input_file.clone().unwrap())?;
+                        let mut reader = BufReader::new(file);
+                        let _gif = parse_gif(&mut reader, decode)?;
+                    }
+                }
+            },
+            _ => {
+                eprintln!("Unknown argument: {}", arg);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if input_file.is_none() {
+        eprintln!("Input file is required. Use -i <input_file>");
         std::process::exit(1);
     }
 
-    let filename = &args[1];
-    let output_file = &args[2];
+    if !decode && output_file.is_none() {
+        eprintln!("Output file is required unless -d is used. Use -o <output_file>");
+        std::process::exit(1);
+    }
+
+    let filename = input_file.unwrap();
+    let output_file = output_file.unwrap_or_else(|| String::new());
 
     // Open the input GIF file
     let file = File::open(filename)?;
     let mut reader = BufReader::new(file);
 
     // Parse the GIF
-    let mut gif = parse_gif(&mut reader)?;
+    let mut gif = parse_gif(&mut reader, decode)?;
 
     // Read from stdin and modify the Plain Text Extensions
     let mut input = String::new();
@@ -812,7 +862,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     gif.plain_text_extensions = new_plain_text_extensions;
 
     // Reassemble and write the modified GIF back to a file
-    reassemble_gif(&mut reader, output_file, &gif)?;
+    reassemble_gif(&mut reader, &output_file, &gif)?;
     println!("GIF reassembled and saved to {}", output_file);
 
     Ok(())
