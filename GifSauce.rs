@@ -750,12 +750,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "-d" => loop {
                 match args_iter.next() {
                     None => {
-                        eprintln!("-== End Processing files ==-");
+                        //eprintln!("-== End Processing files ==-");
                         exit(0)
                     }
                     Some(default) => {
                         let file = default.clone();
-                        println!("{}", file);
+                        //println!("{}", file);
                         input_file = Some(file.clone());
                         decode = true;
                         let file = File::open(&input_file.clone().unwrap())?;
