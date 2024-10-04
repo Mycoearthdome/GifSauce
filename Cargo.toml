@@ -6,6 +6,9 @@ edition2024 = "2024"
 [profile.dev]
 debug = true
 
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+
 [dependencies]
 lzw = "0.10.0"
 

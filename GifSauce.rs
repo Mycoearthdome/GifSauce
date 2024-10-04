@@ -735,7 +735,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(file) = args_iter.next() {
                     input_file = Some(file.clone());
                 } else {
-                    eprintln!("Expected input file after -i");
+                    eprintln!("Expected orignal carrier file after -i");
                     std::process::exit(1);
                 }
             }
@@ -743,7 +743,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(file) = args_iter.next() {
                     output_file = Some(file.clone());
                 } else {
-                    eprintln!("Expected output file after -o");
+                    eprintln!("Expected stegged filename file after -o");
                     std::process::exit(1);
                 }
             }
@@ -772,12 +772,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if input_file.is_none() {
-        eprintln!("Input file is required. Use -i <input_file>");
+        eprintln!("Original carrier is required. Use -i <input_file>");
         std::process::exit(1);
     }
 
     if !decode && output_file.is_none() {
-        eprintln!("Output file is required unless -d is used. Use -o <output_file>");
+        eprintln!("Stegged filename is required unless -d is used. Use -o <output_file>");
         std::process::exit(1);
     }
 
